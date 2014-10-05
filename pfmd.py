@@ -1,3 +1,6 @@
+import serlcd
+import RPi.GPIO as GPIO
+
 
 from time import sleep, gmtime, strftime
 import random
@@ -5,15 +8,7 @@ import subprocess
 import os
 import atexit
 import select
-
 import ConfigParser
-
-config = ConfigParser.ConfigParser()
-config.read("/home/pi/pfm.conf")
-
-keylock = True
-pin = config.get('keylock', 'pin')
-
 import glib
 
 from pyudev import Context, Monitor
@@ -28,19 +23,130 @@ import re
 
 import glib, gio, gobject
 
-# FICK FACK
+###### HIER GEHTS LOS!!!
+
+# configure hardware
+GPIO.setwarnings(False)
+GPIO.setmode(GPIO.BCM)
+
+BTN_UP  = 20
+BTN_DWN = 13
+BTN_SET = 5
+
+GPIO.setup(BTN_UP, GPIO.IN, pull_up_down = GPIO.PUD_UP)
+GPIO.setup(BTN_DWN, GPIO.IN, pull_up_down = GPIO.PUD_UP)
+GPIO.setup(BTN_SET, GPIO.IN, pull_up_down = GPIO.PUD_UP)
+
+LED_ON = 0
+LED_TX = 1
+
+
+# load config file
+config = ConfigParser.ConfigParser()
+config.read("/home/pi/pfm.conf")
+
+# define runtime constants
+locked      = True
+pin_target  = config.get('keylock', 'pin')
+pin_pos     = 0
+pin_input   = [0,0,0,0]
+
+print pin_target
 
 
 # initially open the fifo for writing
 mplayer_fifo = open("/home/pi/.mplayer_control", "w")
 
+# initialize display
+lcd = serlcd.SerLCD()
 
+
+# pin lock functions
+
+def pinlock():
+
+    # prepare screen for pin input
+    lcd.clear()
+    lcd.cursor(1,3)
+    lcd.write('Unlock Pocket FM')
+
+    pin_pos_offset = 7
+    for i in range(4):
+        lcd.cursor(3,pin_pos_offset+i*2)
+        lcd.write(str(pin_input[i]))
+
+    # enable cursor for input
+    lcd.cursor(3,pin_pos_offset)
+    lcd.show_cursor()
+
+    while locked:
+        pass
+
+    # hide cursor when done
+    lcd.show_cursor(False)
+
+def update_pin_screen():
+    pin_pos_offset = 7
+    for i in range(4):
+        lcd.cursor(3,pin_pos_offset+i*2)
+        lcd.write(str(pin_input[i]))
+
+    # enable cursor for input
+    lcd.cursor(3,pin_pos_offset+pin_pos*2)
+
+def increase_digit(pin):
+    if pin_input[pin_pos] < 9:
+        pin_input[pin_pos] += 1
+    else:
+        pin_input[pin_pos] = 0
+
+    update_pin_screen()
+
+def decrease_digit(pin):
+    if pin_input[pin_pos] > 0:
+        pin_input[pin_pos] -= 1
+    else:
+        pin_input[pin_pos] = 9
+
+    update_pin_screen()
+
+def set_digit(pin):
+    global pin_pos, pin_input, pin_target
+    
+    # next digit
+    if pin_pos < 3:
+        pin_pos += 1
+        update_pin_screen()
+    else:
+
+        # compare strings
+        pin = "".join( map(str, pin_input) )
+        
+        if pin == pin_target:
+            print "Hurra"
+            locked = False
+            #pin_success()
+        else:
+            print "noe"
+            # reset and cycle
+            pin_pos = 0
+            pin_input = [0,0,0,0]
+            update_pin_screen()
+
+# initially bound inputs to pinlock
+GPIO.add_event_detect(BTN_UP,  GPIO.RISING, callback = increase_digit, bouncetime = 100)
+GPIO.add_event_detect(BTN_DWN, GPIO.RISING, callback = set_digit, bouncetime = 100)
+GPIO.add_event_detect(BTN_SET, GPIO.RISING, callback = set_digit, bouncetime = 100)
+
+
+
+
+# Handling USB events
 def add_to_playlist(files_array, playlist_file):
     playlist = playlist_file
     usb_path = '/media/usb'
     f = open(playlist, 'w')
     for item in files_array:
-        #print "Write: %s/%s\n" % (usb_path,item)
         f.write("%s/%s\n" % (usb_path,item))
     f.close()
     return playlist
@@ -52,9 +158,7 @@ def list_audio_files(dir):
         for file in FILES:
             if file.endswith(('.mp3','.MP3')) and not file.startswith(('.')):
                 audio_files.append(file)
-                #print file
     return audio_files
-
 
 def device_event(observer, action, device):
 
@@ -88,16 +192,20 @@ def device_event(observer, action, device):
             mplayer_fifo.write("loadlist /home/pi/audio/playlist.txt\n")
             mplayer_fifo.flush()            
 
+
+# Main program loop
 def update_loop():
     print "In the loop. Wait 1s"
     sleep(1)
     return True
 
+# Initial program
 try:
-
-    if keylock:
+    # Ask for correct pin first
+    if locked:
         print "Pinlock is active"
-	print pin
+        pinlock()
+	
 	exit()
     
     context = Context()
@@ -116,3 +224,4 @@ try:
 finally:
     # close the fifo
     mplayer_fifo.close()
+    GPIO.cleanup()
