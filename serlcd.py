@@ -44,6 +44,8 @@ LCD_SET4LINE = '\x05'
 LCD_SET16CHAR = '\x04'
 LCD_SET20CHAR = '\x03'
 
+LCD_BAUD9600 = '\x0D'
+
 def debug(msg):
     if debug_active:
         date = timeit.default_timer()
@@ -52,14 +54,21 @@ def debug(msg):
 
 class SerLCD(object):
 
-    _displaycontrol = 0x00
-
     def __init__(self):
         debug('Initializing Display')
         self.lcd = serial.Serial(port='/dev/ttyAMA0',baudrate=9600)
-        self.clear()
 
-    # Basics
+        # tell the display what it is...
+        self.special(LCD_SET4LINE)
+        sleep(0.01)
+        self.special(LCD_SET20CHAR)
+        sleep(0.01)
+
+        # set default baud
+        self.special(LCD_BAUD9600)
+        sleep(0.01)
+
+        self.clear()
 
     def write(self, msg):
         self.lcd.write(msg)
@@ -91,8 +100,19 @@ class SerLCD(object):
             self.command('\x0E')
         else:
             self.command('\x0C')
-        
+    
+    def splash(self):
+        # print (will be centerd on 20x4)
+        self.write('    Pocket FM 2.0   ')
+        self.write('                    ')
+
+        # save in EEPROM
+        sleep(0.1)
+        self.special(LCD_SETSPLASHSCREEN)
+        sleep(0.1)
+
 
     def __del__(self):
         debug('__del__()')
+        self.lcd.close()
         sleep(0.005)
