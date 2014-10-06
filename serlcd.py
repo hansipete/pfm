@@ -4,7 +4,7 @@ from time import sleep
 import timeit
 
 # debug?
-debug_active = True
+debug_active = False
 
 # Init Commands
 LCD_SEND_COMMAND = '\xFE'
